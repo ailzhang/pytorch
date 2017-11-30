@@ -242,9 +242,18 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
     int i_ldb = (int)ldb;
     int i_ldc = (int)ldc;
 
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
     cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
     cublasSetStream(handle, THCState_getCurrentStream(state));
+    cudaEventRecord(start);
     THCublasCheck(cublasSgemm(handle, opa, opb, i_m, i_n, i_k, &alpha, a, i_lda, b, i_ldb, &beta, c, i_ldc));
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    printf("gemm time: %f\n", milliseconds);
     return;
   }
   THError("Cublas_Sgemm only supports m, n, k, lda, ldb, ldc"
