@@ -4,7 +4,6 @@
 #include "Store.hpp"
 
 #include "gloo/transport/tcp/device.h"
-//#include "gloo/transport/ibverbs/device.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -14,8 +13,7 @@
 #include <string>
 #include <unordered_map>
 
-//#include <infiniband/verbs.h>
-//#include <infiniband/arch.h>
+
 
 #define RETURN_IF_NOT_IN_GROUP                                                \
   {                                                                           \
@@ -86,25 +84,6 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
   // will not connect to each other.
   ::gloo::transport::tcp::attr attr(config.public_address.c_str());
   _device = ::gloo::transport::tcp::CreateDevice(attr);
-  // Comment the two lines ablove and uncomment the headers & block below to enable ibverbs
-  /*
-  struct ibv_device **dev_list;
-    int num_devices, i;
-    dev_list = ibv_get_device_list(&num_devices);
-    if(!dev_list) {
-            perror("Failed to get IB devices list");
-            exit(1);
-    }
-    std::string ibdevice_name = ibv_get_device_name(dev_list[0]);
-    ibv_free_device_list(dev_list);
-    ::gloo::transport::ibverbs::attr attr = {
-      .name = ibdevice_name, 
-      .port = 1,
-      .index = 1,
-    };
-    _device = ::gloo::transport::ibverbs::CreateDevice(attr);
-  */
-
 
   if (_rank == 0) {
     _addr = "localhost";
