@@ -317,7 +317,6 @@ def _generate_function_classes(scope_dict):
         'HardShrink': 'Hardshrink',
         'SoftPlus': 'Softplus',
         'SoftShrink': 'Softshrink',
-        'MSECriterion': 'MSELoss',
         'AbsCriterion': 'L1Loss',
         'BCECriterion': 'BCELoss',
         'ClassNLLCriterion': 'NLLLoss',

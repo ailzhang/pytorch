@@ -125,4 +125,19 @@ Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tenso
 
     return grad_input;
 }
+
+Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor loss = (input - target).pow(2);
+
+  return apply_loss_reduction(loss, reduction);
+}
+
+Tensor mse_loss_backward(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor grad_input = (input - target).mul_(2.).mul_(grad);
+
+  if (reduction == Reduction::ElementwiseMean) {
+    grad_input.div_(input.numel());
+  }
+  return grad_input;
+}
 }}  // namespace at::native

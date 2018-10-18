@@ -1812,8 +1812,11 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='elementwi
     See :class:`~torch.nn.MSELoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss, input, target, reduction)
+        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+    else:
+        reduction = _Reduction.get_enum(reduction)
+
+    return torch.mse_loss(input, target, reduction)
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,

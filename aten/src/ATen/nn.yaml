@@ -10,11 +10,6 @@
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
-  cname: MSECriterion
-  scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
-
 - name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean)
   cname: MultiMarginCriterion
   scalar_check:

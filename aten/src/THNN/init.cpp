@@ -91,9 +91,6 @@
 #include "generic/LogSigmoid.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/MSECriterion.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/SoftMarginCriterion.c"
 #include "THGenerateFloatTypes.h"
 

@@ -834,6 +834,15 @@ Tensor diagonal_backward(const Tensor & grad, IntList input_sizes, int64_t offse
   return grad_input;
 }
 
+Tensor mse_loss_target_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor grad_target = (input - target).mul_(-2.).mul_(grad_output);
+
+  if (reduction == Reduction::ElementwiseMean) {
+    grad_target.div_(target.numel());
+  }
+  return grad_target;
+}
+
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64_t reduction) {
   auto grad_input = 2 * grad;
   if (reduction == Reduction::ElementwiseMean) {

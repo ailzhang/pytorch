@@ -458,7 +458,7 @@ _(aten, mm) \
 _(aten, mode) \
 _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
-_(aten, mse_loss_forward) \
+_(aten, mse_loss_target_backward) \
 _(aten, mul) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
