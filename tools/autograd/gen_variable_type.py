@@ -325,6 +325,10 @@ def emit_body(declaration):
         return True
 
     inputs = [arg for arg in arguments if not arg.get('output', False)]
+    if name == 'mse_loss':
+        print('============================attention!========================')
+        print(inputs)
+        exit(1)
     differentiable_inputs = list(filter(is_differentiable, inputs))
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
