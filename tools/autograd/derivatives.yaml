@@ -1096,6 +1096,7 @@
 - name: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction)
   grad_output: mse_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
   self: mse_loss_double_backward(grad * grad_output, self, reduction)
+  target: mse_loss_double_backward_target(grad * grad_output, self, reduction)
 
 - name: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int64_t reduction, int64_t ignore_index, Tensor total_weight)
   grad_output: nll_loss(grad, target, weight, reduction, ignore_index)

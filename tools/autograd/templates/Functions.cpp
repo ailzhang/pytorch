@@ -851,6 +851,14 @@ Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64
   return grad_input;
 }
 
+Tensor mse_loss_double_backward_target(const Tensor & grad, const Tensor & input, int64_t reduction) {
+  auto grad_target = 2 * grad;
+  if (reduction == Reduction::ElementwiseMean) {
+    grad_target /= input.numel();
+  }
+  return grad_target;
+}
+
 Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
   if (reduction == Reduction::None) {
     return mse_loss_backward(grad, input, target, reduction);
