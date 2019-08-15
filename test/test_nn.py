@@ -1,4 +1,5 @@
 import math
+import pdb
 import sys
 import random
 import string
@@ -29,7 +30,7 @@ from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
-    TEST_NUMPY, TEST_SCIPY, download_file, PY3, PY34, to_gpu, \
+    TEST_NUMPY, TEST_SCIPY, download_file, PY3, PY34, to_gpu, to_xla,\
     get_function_arglist, load_tests
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
@@ -40,6 +41,7 @@ from common_utils import TEST_WITH_UBSAN
 
 from torch.nn import MultiheadAttention
 
+TEST_CUDA = True
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -52,8 +54,7 @@ if TEST_NUMPY:
     import numpy as np
 
 ALL_TENSORTYPES = [torch.float,
-                   torch.double,
-                   torch.half]
+                   torch.double]
 
 NO_HALF_TENSORTYPES = [torch.float,
                        torch.double]
@@ -61,8 +62,7 @@ NO_HALF_TENSORTYPES = [torch.float,
 DOUBLE_TENSORTYPES = [torch.double]
 
 dtype2prec = {torch.float: 1e-5,
-              torch.double: 1e-5,
-              torch.half: 1e-2}
+              torch.double: 1e-5}
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -293,7 +293,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             output_ip.backward(grad)
             test_case.assertEqual(input.grad, input_ip.grad)
 
-        if isinstance(input, torch.LongTensor) and TEST_CUDA:
+        if isinstance(input, torch.LongTensor) and False:
             # check that cuda() moves module parameters to correct GPU device,
             # and that float() casts parameters correctly
 
@@ -331,7 +331,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             for p in module.parameters():
                 test_case.assertIsInstance(p, torch.DoubleTensor)
 
-            if TEST_CUDA and self.should_test_cuda:
+            if False and self.should_test_cuda:
+                print('NOOOO')
                 # check that cuda() moves module parameters to correct GPU device,
                 # and that float() casts parameters correctly
 
@@ -445,7 +446,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             else:
                 return obj
 
-        if not TEST_CUDA or not self.should_test_cuda:
+        if not TEST_CUDA or not True:
             raise unittest.SkipTest('Excluded from CUDA tests')
         try:
             cpu_input = self._get_input()
@@ -463,9 +464,9 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
                 gpu_module.type(dtype)
 
             # GPU setup
-            gpu_input = to_gpu(cpu_input)
-            gpu_target = to_gpu(cpu_target)
-            gpu_module.cuda()
+            gpu_input = to_xla(cpu_input)
+            gpu_target = to_xla(cpu_target)
+            gpu_module.to('xla:0')
 
             # torch.HalfTensor doesn't support most operations, converting back to default
             if dtype == torch.half:
@@ -2555,10 +2556,10 @@ class TestNN(NNTestCase):
         self.assertEqual(res_old, res_F)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types([torch.float, torch.half])
+    @repeat_test_for_types([torch.float])
     @skipIfRocm
     def test_softmax_dtype(self, dtype=torch.float):
-        input = torch.rand(32, 100, device="cuda", dtype=dtype, requires_grad=True)
+        input = torch.rand(32, 100, device="xla:0", dtype=dtype, requires_grad=True)
         inputf = input.to(torch.float).detach().requires_grad_(True)
         out = F.softmax(input, dim=-1, dtype=torch.float)
         outf = F.softmax(inputf, dim=-1)
@@ -2571,8 +2572,8 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0)
 
     def _test_softmax_backward(self, device):
-        if device.type == 'cuda':
-            dtypes = [torch.float, torch.half]
+        if device.type == 'xla:0':
+            dtypes = [torch.float]
         else:
             dtypes = [torch.float]
         sizes = [(0, 10), (32, 20), (10, 0)]
@@ -2589,7 +2590,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_softmax_backward_cuda(self):
-        self._test_softmax_backward(torch.device('cuda'))
+        self._test_softmax_backward(torch.device('xla:0'))
 
     @unittest.skipIf(TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
                      'Linear_FP16_weight requires FBGEMM. FBGEMM does not play'
@@ -2633,7 +2634,7 @@ class TestNN(NNTestCase):
         logits = logits.reshape([1, 3])
         logits = logits.to(dtype).requires_grad_()
         if cuda:
-            logits = logits.cuda()
+            logits = logits.to('xla:0')
         probs = logits.softmax(dim=-1)
 
         counts = torch.zeros_like(logits)
@@ -2896,7 +2897,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pool3d_size_one_feature_dim(self):
         # Tests crazy strides for feature dim of size 1
-        x = Variable(torch.randn(7, 1, 5, 3, 2, device="cuda"))
+        x = Variable(torch.randn(7, 1, 5, 3, 2, device="xla:0"))
         strange_strides = [30, 1234, 6, 2, 1]
         y = x.as_strided(x.size(), strange_strides)
         x = x.cpu().as_strided(x.size(), strange_strides)
@@ -2910,7 +2911,7 @@ class TestNN(NNTestCase):
             # Should not crash
             out_y = fn(y)
             out_x = fn(x)
-            self.assertEqual(out_y, out_x.cuda(), test)
+            self.assertEqual(out_y, out_x.to('xla:0'), test)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_AvgPool3d_backward_after_cat_dim1_cuda(self):
@@ -2918,7 +2919,7 @@ class TestNN(NNTestCase):
         x = torch.randn(1, 3, 4, 4, 4, device="cuda", requires_grad=True)
         y = F.avg_pool3d(x, kernel_size=3, padding=1, stride=2)
 
-        grad = torch.randn(y.size(), device="cuda")
+        grad = torch.randn(y.size(), device="xla:0")
         # increase the stride in dimension 0. the tensor is still contiguous because size[0] is 1
         stride = list(grad.stride())
         stride[0] = stride[0] * 2
@@ -2930,14 +2931,14 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_contig_wrong_stride_cudnn(self):
         # x has to have batch_size 1 to test contiguous checks
-        x = torch.randn(1, 16, 5, 5, device="cuda")
+        x = torch.randn(1, 16, 5, 5, device="xla:0")
         stride = list(x.stride())
         stride[0] = 20
         # change the stride in dimension 0. the tensor is still contiguous because size[0] is 1
         x.set_(x.storage(), 0, x.size(), stride)
         self.assertTrue(x.is_contiguous())
-        F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device="cuda"))
-        F.conv2d(x, torch.randn(1, 16, 1, 1, device="cuda"))
+        F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device="xla:0"))
+        F.conv2d(x, torch.randn(1, 16, 1, 1, device="xla:0"))
 
     def test_embedding_bag(self):
         for dtype in [torch.double, torch.float]:
@@ -5896,9 +5897,10 @@ class TestNN(NNTestCase):
         self._test_variable_sequence()
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(True, 'XLA no storage for None input')
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_variable_sequence_cuda(self, dtype=torch.float):
-        self._test_variable_sequence("cuda", dtype)
+        self._test_variable_sequence("xla:0", dtype)
 
     def test_LSTM_cell(self):
         # this is just a smoke test; these modules are implemented through
@@ -8226,7 +8228,7 @@ class TestNN(NNTestCase):
 
         device_list = ['cpu']
         if TEST_CUDA:
-            device_list.append('cuda')
+            device_list.append('xla:0')
 
         for align_corners in [True, False]:
             kwargs = dict(mode='bicubic', align_corners=align_corners)
@@ -9241,8 +9243,8 @@ def add_test(test, decorator=None):
 
         def test_half(self, test=test, kwargs=kwargs):
             test.test_cuda(self, dtype=torch.half, **kwargs)
-        if getattr(test, 'check_half', True):
-            add(cuda_test_name + '_half', test_half)
+        # if getattr(test, 'check_half', True):
+            # add(cuda_test_name + '_half', test_half)
     else:
         add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
 
@@ -9584,10 +9586,10 @@ class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
         t = torch.tensor([0, 1, 4, 8]).to(input.device)
         return nn.AdaptiveLogSoftmaxWithLoss.__call__(self, input, t).output
 
-add_test(NewModuleTest(
-    constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
-    input_size=(4, 16),
-    fullname='AdaptiveLogSoftmax'))
+#add_test(NewModuleTest(
+#    constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
+#    input_size=(4, 16),
+#    fullname='AdaptiveLogSoftmax'))
 
 
 # The following are helpers for TestNN.test_affine_*

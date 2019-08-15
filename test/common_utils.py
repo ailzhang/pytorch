@@ -40,6 +40,7 @@ from torch._utils_internal import get_writable_path
 from torch._six import string_classes, inf
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch_xla
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -301,6 +302,32 @@ def to_gpu(obj, type_map=None):
         return [to_gpu(o, type_map) for o in obj]
     elif isinstance(obj, tuple):
         return tuple(to_gpu(o, type_map) for o in obj)
+    else:
+        return deepcopy(obj)
+
+def to_xla(obj, type_map=None):
+    if type_map is None:
+        type_map = {}
+    if isinstance(obj, torch.Tensor):
+        assert obj.is_leaf
+        # t = type_map.get(obj.type(), get_gpu_type(obj.type()))
+        with torch.no_grad():
+            mapped = type_map.get(obj.type())
+            if mapped:
+                obj2 = obj.to(mapped)
+            else:
+                obj2 = obj
+
+            res = obj2.clone().to('xla:0')
+            res.requires_grad = obj.requires_grad
+        return res
+    elif torch.is_storage(obj):
+        print('xla doesn\'t have storage')
+        return obj.new().resize_(obj.size()).copy_(obj)
+    elif isinstance(obj, list):
+        return [to_xla(o, type_map) for o in obj]
+    elif isinstance(obj, tuple):
+        return tuple(to_xla(o, type_map) for o in obj)
     else:
         return deepcopy(obj)
 
