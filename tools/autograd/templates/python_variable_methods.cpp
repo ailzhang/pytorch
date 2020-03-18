@@ -779,8 +779,10 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.isNone(0)) {
+    throw std::runtime_error("AILING");
     return THPUtils_packString(torch::utils::options_to_string(self_.options()));
   }
+  throw std::runtime_error("AILING");
   auto obj = r.pyobject(0);
   auto opt_memory_format = r.memoryformatOptional(2);
   std::string type_name;

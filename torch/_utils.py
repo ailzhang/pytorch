@@ -34,9 +34,9 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
             raise RuntimeError("Cannot cast sparse tensor to dense tensor")
         new_module_name = dtype.__module__.replace('.sparse', '')
         new_values_type_name = new_module_name + '.' + dtype.__name__
-        new_values = torch._values(self).type(new_values_type_name, non_blocking)
+        new_values = torch._values(self).to(new_values_type_name, non_blocking)
         new_indices_type_name = new_module_name + '.LongTensor'
-        new_indices = torch._indices(self).type(new_indices_type_name, non_blocking)
+        new_indices = torch._indices(self).to(new_indices_type_name, non_blocking)
         return dtype(new_indices, new_values, self.size())
     if dtype.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
@@ -309,9 +309,10 @@ def _reorder_tensors_as(tensors, ordered_tensors):
     """
     type_dict = defaultdict(list)
     for tensor in tensors:
-        type_dict[tensor.type()].append(tensor)
+        # type_dict[tensor.type()].append(tensor)
+        type_dict[str(tensor.device) + str(tensor.dtype)].append(tensor)
     type_dict = {t: iter(coll) for t, coll in type_dict.items()}
-    return tuple(next(type_dict[tensor.type()]) for tensor in ordered_tensors)
+    return tuple(next(type_dict[str(tensor.device) + str(tensor.dtype)]) for tensor in ordered_tensors)
 
 
 def _take_tensors(tensors, size_limit):
@@ -328,7 +329,8 @@ def _take_tensors(tensors, size_limit):
     """
     buf_dict = defaultdict(lambda: [[], 0])
     for tensor in tensors:
-        t = tensor.type()
+        # t = tensor.type()
+        t = str(tensor.device) + str(tensor.dtype)
         if tensor.is_sparse:
             indices = torch._indices(tensor)
             values = torch._values(tensor)
