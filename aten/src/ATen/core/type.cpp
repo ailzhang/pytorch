@@ -21,7 +21,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     if (auto ndim = value->sizes().size()) {
       bool has_valid_strides_info =
-          value->strides().isComplete() && value->strides().size() == ndim;
+          value->strides() && value->strides().value().size() == ndim;
 
       out << "(";
       for (size_t i = 0; i < *ndim; ++i) {
@@ -34,7 +34,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           out << "*";
         }
         if (has_valid_strides_info) {
-          out << ":" << *value->strides()[i];
+          out << ":" << value->strides().value()[i];
         }
       }
       out << ")";
@@ -84,7 +84,7 @@ AnyTypePtr AnyType::get() {
 
 TensorTypePtr TensorType::get() {
   static auto value = TensorType::create(
-      {}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
+      {}, {}, SymbolicShape(), {}, {});
   return value;
 }
 
@@ -510,7 +510,10 @@ VaryingShape<int64_t> TensorType::sizes() const {
 TensorTypePtr TensorType::merge(TensorTypePtr other, bool merge_sizes) const {
   auto scalar_type = merge_primitive(scalarType(), other->scalarType());
   auto dev = merge_primitive(device(), other->device());
-  auto sprops = stride_properties().merge(other->stride_properties());
+  c10::optional<StridesInfo> sprops;
+  if (has_strides_info() && other->has_strides_info()) {
+    sprops = strides_info().value().merge(other->strides_info().value());
+  }
   auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
   auto undef = merge_primitive(undefined(), other->undefined());
   return TensorType::create(
@@ -543,8 +546,8 @@ bool TensorType::matchTensor(const at::Tensor& t) {
   }
   // Here we know t.defined() == true and compare all other properties.
   bool rg = at::GradMode::is_enabled() && t.requires_grad();
-  bool matched_strides = (!t.has_storage() && !stride_properties().isComplete())
-    || stride_properties() == computeStrideProps(t.sizes(), t.strides(), t.is_contiguous());
+  bool matched_strides = (!t.has_storage() && !strides_info())
+    || strides_info() == computeStridesInfo(t.sizes(), t.strides(), t.is_contiguous());
   return scalarType().value_or(t.scalar_type()) == t.scalar_type()
     && device().value_or(t.device()) == t.device()
     && requiresGrad().value_or(rg) == rg
@@ -559,7 +562,7 @@ bool TensorType::operator==(const c10::Type& rhs) const {
   auto rt = rhs.expect<TensorType>();
 
   return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-      stride_properties() == rt->stride_properties() &&
+      strides_info() == rt->strides_info() &&
       device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
       undefined() == rt->undefined();
 }
@@ -790,6 +793,7 @@ static std::vector<bool> findContiguous(
   return cont;
 }
 
+/*
 VaryingShape<int64_t> TensorType::strides() const {
   if (!strides_.size().has_value()) {
     return VaryingShape<int64_t>();
@@ -806,8 +810,15 @@ VaryingShape<int64_t> TensorType::strides() const {
   }
   return VaryingShape<int64_t>(ss);
 }
+*/
+c10::optional<std::vector<int>> TensorType::strides() const {
+  if (has_strides_info() && strides_info_.value().has_explicit_strides()) {
+    return strides_info_.value().explicit_strides().value();
+  }
+  return c10::nullopt;
+}
 
-VaryingShape<Stride> TensorType::computeStrideProps(
+StridesInfo TensorType::computeStridesInfo(
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
     bool tensor_contiguity) {
@@ -826,7 +837,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
         return strides[a] < strides[b];
       });
 
-  std::vector<Stride> stride_properties;
+  std::vector<StrideProp> stride_properties;
   for (size_t i = 0; i < stride_indices.size(); i++) {
     bool contiguous_ = tensor_contiguity;
     if (!contiguous_) {
@@ -842,10 +853,11 @@ VaryingShape<Stride> TensorType::computeStrideProps(
                  strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
       }
     }
-    stride_properties.emplace_back(stride_indices[i], contiguous_, strides[stride_indices[i]]);
+    stride_properties.emplace_back(stride_indices[i], contiguous_);
   }
 
-  return VaryingShape<Stride>{stride_properties};
+  //return VaryingShape<Stride>{stride_properties};
+  return StridesInfo(stride_properties, strides.vec());
 }
 
 std::atomic<size_t> ShapeSymbol::num_symbols{1};
@@ -859,14 +871,15 @@ TensorType::TensorType(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
     const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
+    //const VaryingShape<Stride>& strides,
+    const c10::optional<StridesInfo>& strides_info,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined)
     : Type(TypeKind::TensorType),
       scalar_type_(scalar_type),
       device_(device),
       sizes_(sizes),
-      strides_(strides),
+      strides_info_(strides_info),
       requires_grad_(requires_grad),
       undefined_(undefined) {}
 
@@ -886,7 +899,8 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
       t.scalar_type(),
       t.device(),
       SymbolicShape(),
-      VaryingShape<Stride>{},
+      //VaryingShape<Stride>{},
+      c10::nullopt,
       t.requires_grad(),
       false);
 }
@@ -902,9 +916,10 @@ TensorTypePtr TensorType::create(
   TORCH_INTERNAL_ASSERT(
       !strides.concrete_sizes().has_value() ||
       sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
-  auto sprops = strides.concrete_sizes().has_value()
-      ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
-      : VaryingShape<Stride>();
+  c10::optional<StridesInfo> sprops = c10::nullopt;
+  if (strides.concrete_sizes().has_value()) {
+    sprops = computeStridesInfo(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity);
+  }
 
   auto symbol_sizes = SymbolicShape(*sizes.concrete_sizes());
   return TensorType::create(
@@ -915,7 +930,8 @@ TensorTypePtr TensorType::create(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
     const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
+    //const VaryingShape<Stride>& strides,
+    c10::optional<StridesInfo> strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined,
     bool is_inferred) {
@@ -934,7 +950,8 @@ TensorTypePtr TensorType::create(
       scalar_type,
       device,
       SymbolicShape(dim),
-      VaryingShape<Stride>(dim),
+      //VaryingShape<Stride>(dim),
+      StridesInfo(dim),
       requires_grad);
 }
 

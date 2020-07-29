@@ -459,11 +459,12 @@ struct hash<c10::TensorType> {
     return torch::get_hash<
         c10::optional<int8_t>,
         c10::VaryingShape<int64_t>,
-        c10::VaryingShape<int64_t>,
+        //c10::VaryingShape<int64_t>,
+        c10::optional<c10::StridesInfo>,
         c10::optional<bool>>(
         torch::jit::convertOptional(ptt.scalarType()),
         ptt.sizes(),
-        ptt.strides(),
+        ptt.strides_info(),
         ptt.requiresGrad());
   }
 };

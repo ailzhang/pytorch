@@ -576,6 +576,101 @@ struct CAFFE2_API VaryingShape {
   c10::optional<ListOfOptionalElements> dims_;
 };
 
+// Include stride properties per dimension
+struct StrideProp;
+struct CAFFE2_API StrideProp {
+StrideProp (size_t index, bool contiguous) :
+    index_(index), contiguous_(contiguous) {}
+size_t index() const {
+    return index_;
+}
+bool contiguous() const {
+    return contiguous_;
+}
+bool operator==(const StrideProp& rhs) const {
+  return index() == rhs.index() && contiguous() == rhs.contiguous();
+}
+//Merging two StrideProps:
+// 1. When stride_index_ matches but have seen both contiguous_={true, false},
+//    we say merged result is StrideProp(stride_index_, contiguous_= false)
+// 2. When stride_index_ doesn’t match, we say merged result is c10::nullopt
+c10::optional<StrideProp> merge(const StrideProp& other) {
+  if (index() == other.index()) {
+    return StrideProp(index(), contiguous() == other.contiguous() ? contiguous() : false);
+  }
+  return c10::nullopt;
+}
+  private:
+    size_t index_;
+    bool contiguous_;
+};
+
+// Per Tensor
+struct StridesInfo;
+struct CAFFE2_API StridesInfo {
+  StridesInfo(c10::optional<size_t> d) {
+    if (d) {
+    stride_props_ = std::vector<c10::optional<StrideProp>>(*d);
+    }
+  }
+
+  StridesInfo(std::vector<c10::optional<StrideProp>> stride_props, c10::optional<std::vector<int>> explicit_strides = c10::nullopt)
+      : stride_props_(std::move(stride_props)), explicit_strides_(std::move(explicit_strides)) {}
+
+  StridesInfo(std::vector<StrideProp> stride_props, std::vector<long int> explicit_strides )
+  {
+    for (auto s : stride_props) {
+        stride_props_.push_back(std::move(s));
+    }
+    for (auto e: explicit_strides) {
+        explicit_strides_.value().push_back(e);
+    }
+  }
+
+  bool has_explicit_strides() const {
+      return explicit_strides_ ? true : false;
+  }
+
+  bool operator==(const StridesInfo& rhs) const {
+    return stride_props() == rhs.stride_props();
+  }
+
+  c10::optional<std::vector<int>> explicit_strides() const {
+    return explicit_strides_;
+  }
+  std::vector<c10::optional<StrideProp>> stride_props() const {
+    return stride_props_;
+  }
+  //Merging two Strides:
+  //1. Merge two c10:optional<StrideProps>, if any of them is nullopt, result is nullopt.
+  //   Otherwise merge the two StrideProps following rules above.
+  //2. Merge two c10:optional<vector<int>>, if any of them is nullopt, result is nullopt.
+  //   Otherwise we only save it when the two vectors match exactly.
+  c10::optional<StridesInfo> merge(const StridesInfo& other) const {
+    if (stride_props().size() != other.stride_props().size()) {
+        return c10::nullopt;
+    }
+    std::vector<c10::optional<StrideProp>> merged_stride_props;
+    c10::optional<std::vector<int>> merged_explicit_strides = c10::nullopt ;
+
+    if (explicit_strides() && other.explicit_strides()
+            && explicit_strides().value() == other.explicit_strides().value())
+    {
+        merged_explicit_strides = explicit_strides().value();
+    }
+    for (int i = 0; i < stride_props().size(); i++) {
+      if (stride_props()[i] && other.stride_props()[i]) {
+        merged_stride_props.emplace_back(stride_props()[i].value().merge(other.stride_props()[i].value()));
+      }
+    }
+    return StridesInfo(merged_stride_props, merged_explicit_strides);
+  }
+
+private:
+  std::vector<c10::optional<StrideProp>> stride_props_; // stride properties sorted from inner dim to outer dim
+  c10::optional<std::vector<int>> explicit_strides_; // explicit strides, currently only used by NNC
+};
+
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor with a specific size
@@ -597,7 +692,8 @@ struct CAFFE2_API TensorType : public Type {
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
       const SymbolicShape& sizes,
-      const VaryingShape<Stride>& stride_,
+      //const VaryingShape<Stride>& stride_,
+      c10::optional<StridesInfo> strides_,
       c10::optional<bool> requires_grad,
       c10::optional<bool> undefined = false,
       bool is_inferred = false);
@@ -624,10 +720,22 @@ struct CAFFE2_API TensorType : public Type {
 
   VaryingShape<int64_t> sizes() const;
 
-  VaryingShape<int64_t> strides() const;
+  //VaryingShape<int64_t> strides() const;
+  //
+  // Return explict strides if available
+  c10::optional<std::vector<int>> strides() const;
 
-  const VaryingShape<Stride>& stride_properties() const {
-    return strides_;
+  //const VaryingShape<Stride>& stride_properties() const {
+    //return strides_;
+  //}
+  // Returns true if strides_info_ is not null.
+  bool has_strides_info() const {
+    return strides_info_ ? true : false;
+  }
+
+  // Return StridesInfo of Tensor
+  const c10::optional<StridesInfo> strides_info() const {
+    return strides_info_;
   }
 
   c10::optional<at::Device> device() const {
@@ -677,13 +785,14 @@ struct CAFFE2_API TensorType : public Type {
     return copy;
   }
 
-
+// Returns a copy of current TensorType with specified dim(rank)
   TensorTypePtr withDim(c10::optional<size_t> d) {
     auto copy = clone();
     // withDim is only used by the legacy executor
     // that only cares about the rank, so create dummy symbols)) :
     copy->sizes_ = SymbolicShape(d);
-    copy->strides_ = VaryingShape<Stride>(d);
+    //copy->strides_ = VaryingShape<Stride>(d);
+    copy->strides_info_ = StridesInfo(d);
     return copy;
   }
 
@@ -693,7 +802,7 @@ struct CAFFE2_API TensorType : public Type {
     auto cloned = clone();
     auto ssizes = SymbolicShape(sizes);
     cloned->sizes_ = ssizes;
-    cloned->strides_ = computeStrideProps(sizes, strides);
+    cloned->strides_info_ = computeStridesInfo(sizes, strides);
     return cloned;
   }
 
@@ -710,18 +819,19 @@ struct CAFFE2_API TensorType : public Type {
 
   TensorTypePtr dimensionedOnly() const {
     auto copy = clone();
-    copy->sizes_ = SymbolicShape(sizes().size());
-    copy->strides_ = VaryingShape<Stride>(sizes().size());
+    auto rank = sizes().size();
+    copy->sizes_ = SymbolicShape(rank);
+    //copy->strides_ = VaryingShape<Stride>(sizes().size());
+    copy->strides_info_ = StridesInfo(rank);
     return copy;
   }
 
   TensorTypePtr contiguous() const {
     auto cloned = clone();
     TORCH_INTERNAL_ASSERT(sizes().concrete_sizes().has_value());
-    auto strides = computeStrideProps(
+    cloned->strides_info_ = computeStridesInfo(
         *sizes().concrete_sizes(),
         contiguousStridesOf(*sizes().concrete_sizes()));
-    cloned->strides_ = strides;
     return cloned;
   }
 
@@ -736,7 +846,7 @@ struct CAFFE2_API TensorType : public Type {
   // in the type-hierarchy. Excluding require_grad and undefined allows
   // this to match the old behavior.
   bool isComplete() const {
-    return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
+    return scalar_type_ && device_ && sizes_.isComplete() && strides_info_;
   }
 
   bool isInferredType() const {
@@ -747,7 +857,8 @@ struct CAFFE2_API TensorType : public Type {
     static auto valueInferred = TensorType::create(
       /*scalar_type=*/{}, /*device=*/{},
       /*sizes=*/SymbolicShape(),
-      /*stride=*/VaryingShape<Stride>{}, /*requires_grad=*/{},
+      /*stride=*/c10::nullopt,
+      /*requires_grad=*/{},
       /*undefined=*/false, /*is_inferred=*/true);
     return valueInferred;
   }
@@ -782,13 +893,14 @@ struct CAFFE2_API TensorType : public Type {
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
       const SymbolicShape& sizes,
-      const VaryingShape<Stride>& strides,
+      //const VaryingShape<Stride>& strides,
+      const c10::optional<StridesInfo>& strides_info,
       c10::optional<bool> requires_grad,
       c10::optional<bool> undefined = false);
 
   TensorTypePtr clone() const {
     return TensorTypePtr(new TensorType(
-        scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
+        scalar_type_, device_, sizes_, strides_info_, requires_grad_, undefined_));
   }
 
   static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
@@ -802,7 +914,7 @@ struct CAFFE2_API TensorType : public Type {
     return strides;
   }
 
-  static VaryingShape<Stride> computeStrideProps(
+  static StridesInfo computeStridesInfo(
       at::IntArrayRef sizes,
       at::IntArrayRef strides,
       bool tensor_contiguity = false);
@@ -810,7 +922,8 @@ struct CAFFE2_API TensorType : public Type {
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
   SymbolicShape sizes_;
-  VaryingShape<Stride> strides_;
+  //VaryingShape<Stride> strides_;
+  c10::optional<StridesInfo> strides_info_;
   c10::optional<bool> requires_grad_;
   // we exploit the fact certain tensors must be zero in the autograd to
   // optimize gradient computation. Such zero tensors are currently implemented
