@@ -876,14 +876,14 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
 
 TEST(OperatorRegistrationTest, xlaPreAutogradOverridesAutogradKernel) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .impl_unboxedOnlyKernel<decltype(nonautograd_kernel), &nonautograd_kernel>(DispatchKey::XLAPreAutograd)
+    .impl_unboxedOnlyKernel<decltype(nonautograd_kernel), &nonautograd_kernel>(DispatchKey::AutogradXLA)
     .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  op->typed<void (Tensor)>().call(dummyTensor(c10::DispatchKeySet{DispatchKey::XLA, DispatchKey::XLAPreAutograd}));
+  op->typed<void (Tensor)>().call(dummyTensor(c10::DispatchKeySet{DispatchKey::XLA, DispatchKey::AutogradXLA}));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 
