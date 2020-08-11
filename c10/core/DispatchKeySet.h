@@ -7,6 +7,10 @@
 
 namespace c10 {
 
+static inline bool isAliasDispatchKey(DispatchKey k) {
+  return k == DispatchKey::Autograd;
+}
+
 // A representation of a set of DispatchKeys.  A tensor may have multiple
 // tensor type ids, e.g., a Variable tensor can also be a CPU tensor; the
 // DispatchKeySet specifies what type ids apply.  The internal representation is
@@ -51,9 +55,22 @@ public:
   DispatchKeySet(Raw, uint64_t x)
     : repr_(x) {}
   explicit DispatchKeySet(DispatchKey t)
-    : repr_(t == DispatchKey::Undefined
-              ? 0
-              : 1ULL << (static_cast<uint8_t>(t) - 1)) {}
+    : DispatchKeySet() {
+      if (isAliasDispatchKey(t)) {
+        switch (t) {
+          case DispatchKey::Autograd:
+              for (auto k : {DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA}) {
+                repr_ |= DispatchKeySet(k).repr_;
+              }
+              return;
+          default:
+              std::cout << "NOOOO" << std::endl;
+        }
+      } else {
+        repr_ = t == DispatchKey::Undefined ? 0
+                : 1ULL << (static_cast<uint8_t>(t) - 1);
+      }
+    }
   explicit DispatchKeySet(std::initializer_list<DispatchKey> ks)
     : DispatchKeySet() {
     for (auto k : ks) {

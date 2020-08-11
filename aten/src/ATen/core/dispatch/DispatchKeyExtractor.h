@@ -15,7 +15,7 @@ namespace impl {
 // Some keys are ALWAYS considered for inclusion by default, so they are
 // included in the set here.  (const appears to be sufficient for
 // always_included to get inlined, constexpr not necessary)
-const DispatchKeySet always_included{DispatchKey::Autograd, DispatchKey::BackendSelect};
+const DispatchKeySet always_included{DispatchKey::BackendSelect};
 
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
@@ -166,12 +166,14 @@ private:
       DispatchKeySet eligibleKeys,
       DispatchKeySet ks
   ) const {
-    return impl::dispatchTypeId(ks,
+    auto res = impl::dispatchTypeId(ks,
       // Keys that are fallthrough should be skipped
         nonFallthroughKeys_
       // Regardless of fallthrough behavior, only accept keys which are eligible
       // for dispatch, as requested by the user
       & eligibleKeys);
+    //std::cout << res << std::endl;
+    return res;
   }
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)

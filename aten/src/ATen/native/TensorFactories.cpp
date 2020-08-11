@@ -129,7 +129,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
       /*resizeable=*/true);
 
   auto tensor = detail::make_tensor<TensorImpl>(
-      std::move(storage_impl), at::DispatchKey::CPU, dtype);
+      std::move(storage_impl), at::DispatchKeySet({at::DispatchKey::CPU, at::DispatchKey::AutogradCPU}), dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);

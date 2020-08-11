@@ -335,7 +335,9 @@ Tensor legacy_new_from_sequence(
 void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_layout) {
   if (expected_layout == c10::kStrided) {
     TORCH_CHECK(dispatch_key == c10::DispatchKey::CPU
+            || dispatch_key == c10::DispatchKey::AutogradCPU
                 || dispatch_key == c10::DispatchKey::CUDA
+            || dispatch_key == c10::DispatchKey::AutogradCUDA
                 || dispatch_key == c10::DispatchKey::HIP
                 || c10::XLA().has(dispatch_key),
                 "new(): expected DispatchKey: ", c10::DispatchKey::CPU,

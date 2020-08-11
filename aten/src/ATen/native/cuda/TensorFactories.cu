@@ -61,7 +61,7 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
       /*resizeable=*/true);
 
   auto tensor =
-      detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA, dtype);
+      detail::make_tensor<TensorImpl>(storage_impl, DispatchKeySet({DispatchKey::CUDA, DispatchKey::AutogradCUDA}), dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);

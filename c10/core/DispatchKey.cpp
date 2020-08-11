@@ -40,6 +40,12 @@ const char* toString(DispatchKey t) {
       return "QuantizedCPU";
     case DispatchKey::Autograd:
       return "Autograd";
+    case DispatchKey::AutogradCPU:
+      return "AutogradCPU";
+    case DispatchKey::AutogradCUDA:
+      return "AutogradCUDA";
+    case DispatchKey::AutogradXLA:
+      return "AutogradXLA";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
     case DispatchKey::Batched:

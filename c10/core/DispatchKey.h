@@ -180,15 +180,6 @@ enum class DispatchKey : uint8_t {
   // constituent parts.
   Named,
 
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AUTOGRAD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-  // All backends are oblivious to autograd; autograd is handled as a
-  // layer which happens on top of all backends.  It inspects the autograd
-  // metadata of all inputs, determines what autograd metadata should be
-  // constructed by the output, and otherwise defers to the backend to
-  // actually do the numeric computation.  Autograd contains
-  // the bulk of this logic.
-  Autograd,
-
   Tracer,
 
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
@@ -202,6 +193,8 @@ enum class DispatchKey : uint8_t {
   // operator, which you're trying to skip).  In PreAutograd implementations,
   // you are responsible for handling autograd yourself, or deferring to other
   // operators which support autograd.
+  AutogradCPU,
+  AutogradCUDA,
   AutogradXLA,
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
@@ -242,6 +235,17 @@ enum class DispatchKey : uint8_t {
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   NumDispatchKeys, // Sentinel
 
+  // TODO: update comment
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AUTOGRAD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+  // All backends are oblivious to autograd; autograd is handled as a
+  // layer which happens on top of all backends.  It inspects the autograd
+  // metadata of all inputs, determines what autograd metadata should be
+  // constructed by the output, and otherwise defers to the backend to
+  // actually do the numeric computation.  Autograd contains
+  // the bulk of this logic.
+  Autograd,
+
+  NumAllDispatchKeys, // Sentinel
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't
   // be used

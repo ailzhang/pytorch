@@ -163,6 +163,13 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     TORCH_INTERNAL_ASSERT(kern_it->second.front().kernel.isValid());
     return {kern_it->second.front(), "kernel"};
 
+  // 1.5 FIXME
+  } else if ((dispatch_key == DispatchKey::AutogradCPU || dispatch_key == DispatchKey::AutogradCUDA) && kernels_.find(DispatchKey::Autograd) != kernels_.end()) {
+      auto kern_autograd = kernels_.find(DispatchKey::Autograd);
+      TORCH_INTERNAL_ASSERT(!kern_autograd->second.empty());
+      TORCH_INTERNAL_ASSERT(kern_autograd->second.front().kernel.isValid());
+      return {kern_autograd->second.front(), "autograd kernel"};
+
   // 2. Backend fallback
   } else if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
     return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
@@ -179,9 +186,27 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 }
 
 void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
+  // Map alias key to runtime keys.
+  // Map Autograd => {AutogradCPU, AutogradCUDA, AutogradXLA}
+  //if (dispatch_key == DispatchKey::Autograd) {
+  //  updateDispatchTable_(dispatcher, DispatchKey::AutogradCPU);
+  //  updateDispatchTable_(dispatcher, DispatchKey::AutogradCUDA);
+  //  updateDispatchTable_(dispatcher, DispatchKey::AutogradXLA);
+  //  return;
+  //}
+
   auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
+  //if (dispatch_key == DispatchKey::Autograd) {
+  //dispatchKeyExtractor_.setOperatorHasFallthroughForKey(DispatchKey::AutogradCPU, dispatchTable_[dispatch_ix].isFallthrough());
+  //dispatchKeyExtractor_.setOperatorHasFallthroughForKey(DispatchKey::AutogradCUDA, dispatchTable_[dispatch_ix].isFallthrough());
+  //dispatchKeyExtractor_.setOperatorHasFallthroughForKey(DispatchKey::AutogradXLA, dispatchTable_[dispatch_ix].isFallthrough());
+  //} else {
   dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
+  //}
+  if (dispatch_key == DispatchKey::Autograd) {
+    updateDispatchTableFull_(dispatcher);
+  }
 }
 
 void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) {

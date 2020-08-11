@@ -623,7 +623,11 @@ inline DispatchKey computeDispatchKey(TensorOptions options) {
 inline DeviceType computeDeviceType(DispatchKey tid) {
   if (tid == DispatchKey::CPU) {
     return DeviceType::CPU;
+  } else if (tid == DispatchKey::AutogradCPU) {
+    return DeviceType::CPU;
   } else if (tid == DispatchKey::CUDA) {
+    return DeviceType::CUDA;
+  } else if (tid == DispatchKey::AutogradCUDA) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::HIP) {
     return DeviceType::HIP;

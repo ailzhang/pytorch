@@ -23,6 +23,14 @@ ${type_method_definitions}
 
 }  // namespace TypeDefault
 
+TORCH_LIBRARY_IMPL(_, AutogradCPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradCUDA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
 TORCH_LIBRARY(aten, m) {
   ${function_registrations};
 

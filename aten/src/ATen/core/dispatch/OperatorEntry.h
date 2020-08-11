@@ -184,7 +184,7 @@ private:
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
 
-  std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> dispatchTable_;
+  std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumAllDispatchKeys)> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 
   // This manuallyBoxedKernel_ member is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed

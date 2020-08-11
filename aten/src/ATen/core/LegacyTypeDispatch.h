@@ -44,8 +44,10 @@ namespace at {
 // out of VariableType.
 
 // TODO centralize this as part of dispatch key revamp
+// TODO Move this to DispatchKey.h
 static DispatchKeySet autograd_dispatch_keys{
-  DispatchKey::Autograd,
+  DispatchKey::AutogradCPU,
+  DispatchKey::AutogradCUDA,
   DispatchKey::AutogradXLA,
   DispatchKey::PrivateUse1_PreAutograd,
   DispatchKey::PrivateUse2_PreAutograd,

@@ -10,6 +10,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
   } else {
     nonFallthroughKeys_ = nonFallthroughKeys_.add(k);
   }
+  //std::cout << k << " " << has_fallthrough << std::endl;
 }
 
 std::string DispatchKeyExtractor::dumpState() const {
