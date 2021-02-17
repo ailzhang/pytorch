@@ -399,6 +399,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
 template<class Return, class... Args>
 C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  // std::cout << op.operatorIterator_->op.dumpState() << std::endl;
   auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(
       DispatchKeySet::FULL,

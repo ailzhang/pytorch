@@ -876,7 +876,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     body.append(declare_returned_variables(f))
 
     body.append(emit_call(f, unpacked_bindings))
-    body.extend(emit_increment_version(f))
+    #body.extend(emit_increment_version(f))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called

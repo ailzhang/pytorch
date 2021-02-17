@@ -104,11 +104,15 @@ def gen_autograd(
     # Generate VariableType.h/cpp
     from .gen_trace_type import gen_trace_type
     from .gen_variable_type import gen_variable_type
+    from .gen_inplace_view import gen_inplace_view
     if not disable_autograd:
         gen_variable_type(out, native_functions_path, differentiability_infos, template_path, operator_selector)
 
         # operator filter not applied as tracing sources are excluded in selective build
         gen_trace_type(out, native_functions_path, template_path)
+
+        # generate inplace and view kernel
+        gen_inplace_view(out, native_functions_path, template_path)
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
