@@ -3,6 +3,7 @@
 #include <torch/library.h>
 
 #include "torch/csrc/autograd/function.h"
+#include <ATen/core/grad_mode.h>
 
 #include <ATen/RedispatchFunctions.h>
 #include "ATen/quantized/Quantizer.h"

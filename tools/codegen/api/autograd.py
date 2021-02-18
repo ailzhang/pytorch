@@ -120,3 +120,9 @@ class DifferentiableOutput:
 
     # TODO: only to keep it byte-for-byte compatible with the old codegen, should remove.
     cpp_type: str
+
+@dataclass(frozen=True)
+class NativeFunctionWithDifferentiabilityInfo:
+    func: NativeFunction
+    info: Optional[DifferentiabilityInfo]
+

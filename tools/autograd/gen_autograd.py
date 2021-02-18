@@ -24,6 +24,10 @@ torch/csrc/autograd/generated/
 import argparse
 import os
 from tools.codegen.selective_build.selector import SelectiveBuilder
+from tools.codegen.api.autograd import *
+from tools.codegen.gen import parse_native_yaml
+from tools.codegen.api.types import *
+from typing import List
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
@@ -86,6 +90,95 @@ RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'tensor_split', 'swapdims', 'swapaxes'
 })
 
+def match_differentiability_info(
+    native_functions: List[NativeFunction],
+    differentiability_infos: Sequence[DifferentiabilityInfo],
+) -> List[NativeFunctionWithDifferentiabilityInfo]:
+    """Sets the "derivative" key on declarations to matching autograd function
+
+    In-place functions will use the out-of-place derivative definition if there
+    is no in-place specific derivative.
+    """
+
+    info_by_schema = {info.func.func: info for info in differentiability_infos}
+    functional_info_by_signature = {
+        info.func.func.signature(strip_default=True): info
+        for info in differentiability_infos
+        if info.func.func.kind() == SchemaKind.functional}
+
+    def find_info(f: NativeFunction) -> Tuple[Optional[DifferentiabilityInfo], bool]:
+        if f.func in info_by_schema:
+            return info_by_schema[f.func], True
+
+        # if there is no exact match look for the out-of-place signature.
+        # i.e mul() for mul_() or mul_out()
+        return functional_info_by_signature.get(f.func.signature(strip_default=True)), False
+
+    result: List[NativeFunctionWithDifferentiabilityInfo] = []
+    for f in native_functions:
+        info, is_exact_match = find_info(f)
+
+        # Currently, the '.strides()' to 'strides_or_error' replacement does not support
+        # 'self' derivatives of an inplace function, so we must check for this case.
+        if f.func.kind() == SchemaKind.inplace and (info is not None):
+            for derivative in info.derivatives:
+                if 'self' in derivative.var_names:
+                    for saved_input in derivative.saved_inputs:
+                        assert 'strides_or_error' not in saved_input.expr, (
+                            "Calling '.strides()' in the 'self' derivative formula of an "
+                            f"in-place function is not supported: {f.func}")
+
+        result.append(NativeFunctionWithDifferentiabilityInfo(
+            func=f,
+            info=info,
+        ))
+
+    return result
+
+def dispatch_strategy(fn: NativeFunctionWithDifferentiabilityInfo) -> str:
+    """How are we going to call the underlying implementation of a
+    declaration?  There are two strategies:
+
+        - use_derived: we want to call the implementation on CPUDoubleType
+          (or a similar, derived Type instance).  Because these derived
+          instances deal in Tensors, not Variables (it's a completely different
+          object, so it doesn't dispatch back to VariableType), code on
+          this dispatch path needs to wrap/unwrap tensors.  If the
+          derived implementation takes and returns tensors, the
+          implementation is usually differentiable (although we also use
+          the derived dispatch path for non-differentiable functions
+          that we still want to dispatch on the derived Type instance;
+          e.g., size())
+
+        - use_type: we want to call the implementation on Type, because
+          it is implemented concretely, and the functions it invokes will
+          get dispatched back to VariableType (which will ensure that they
+          are differentiable.)
+    """
+    if fn.func.is_abstract or (fn.info is not None and fn.info.has_derivatives):
+        # If the function is abstract (not implemented on at::Type), we must
+        # call the implementation on the derived type with unpacked tensors.
+
+        # If the function has a derivative specified and is concrete, we could
+        # call either implementation. We prefer the calling the derived
+        # type's implementation with unpacked tensors because it is more
+        # performant in some cases: any internal calls to other ATen functions
+        # won't have the history tracked.
+
+        # If the function has a type dispatched argument (i.e. is a factory),
+        # we prefer calling the derived type's implementation both because it is
+        # more performant and to ensure factory functions return tensors with _version
+        # of 0 (probably not strictly necessary, but nice to have to keeps versions simple
+        # to understand.
+
+        return 'use_derived'
+    else:
+        # If the function is concrete (we don't have to override it) and we
+        # didn't declare it in derivatives.yaml, we'll assume that it is
+        # actually implemented out of differentiable functions. (This
+        # assumption might not hold, but then you'll see gradcheck fail.)
+        return 'use_type'
+
 def gen_autograd(
     aten_path: str,
     native_functions_path: str,
@@ -101,18 +194,23 @@ def gen_autograd(
 
     template_path = os.path.join(autograd_dir, 'templates')
 
+    fns = list(sorted(filter(
+        operator_selector.is_native_function_selected_for_training,
+        parse_native_yaml(native_functions_path)), key=lambda f: cpp.name(f.func)))
+    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo] = match_differentiability_info(fns, differentiability_infos)
+
     # Generate VariableType.h/cpp
     from .gen_trace_type import gen_trace_type
     from .gen_variable_type import gen_variable_type
     from .gen_inplace_view import gen_inplace_view
     if not disable_autograd:
-        gen_variable_type(out, native_functions_path, differentiability_infos, template_path, operator_selector)
+        gen_variable_type(out, native_functions_path, fns_with_infos, template_path)
 
         # operator filter not applied as tracing sources are excluded in selective build
         gen_trace_type(out, native_functions_path, template_path)
 
         # generate inplace and view kernel
-        gen_inplace_view(out, native_functions_path, template_path)
+        gen_inplace_view(out, native_functions_path, fns_with_infos, template_path)
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib

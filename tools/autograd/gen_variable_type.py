@@ -25,7 +25,7 @@
 from dataclasses import dataclass
 
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
-    MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
+    MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT, dispatch_strategy
 from .gen_autograd_functions import uses_single_grad
 from .gen_trace_type import (
     MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, MANUAL_AUTOGRAD,
@@ -302,17 +302,12 @@ ${statements}
 #endif
 """)
 
-@dataclass(frozen=True)
-class NativeFunctionWithDifferentiabilityInfo:
-    func: NativeFunction
-    info: Optional[DifferentiabilityInfo]
 
 def gen_variable_type(
     out: str,
     native_yaml_path: str,
-    differentiability_infos: Sequence[DifferentiabilityInfo],
+    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
-    operator_selector: SelectiveBuilder,
 ) -> None:
 
     """VariableType.h and VariableType.cpp body
@@ -321,11 +316,6 @@ def gen_variable_type(
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
-    fns = list(sorted(filter(
-        operator_selector.is_native_function_selected_for_training,
-        parse_native_yaml(native_yaml_path)), key=lambda f: cpp.name(f.func)))
-    fns_with_infos = match_differentiability_info(fns, differentiability_infos)
-
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     gen_variable_type_shard(fm, fns_with_infos, 'VariableType.h', 'VariableType.h')
 
@@ -739,44 +729,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         rhs_value: Optional[str] = None
         if not any(r.type.is_tensor_like() for r in f.func.returns):
             rhs_value = var
-        elif view_info is not None:
-            # See NOTE [ Autograd View Variables ] in variable.h for details.
-            differentiable_output_vars = {r.name for r in differentiable_outputs}
-
-            if not isinstance(view_info, str):
-                raise TypeError(f'The view info should be a string for {base_name}, but it is: {view_info}')
-
-            if len(differentiable_output_vars) == 0:
-                # no output is differentiable (.indices() for SparseTensors for example)
-                rhs_value = f'as_view({view_info}, {var}, /* is_bw_differentiable */ false, /* is_fw_differentiable */ false)'
-            elif len(differentiable_output_vars) == 1:
-                # Single differentiable output (Tensor or Tensor[])
-                return_info = differentiable_outputs[0]
-                # We only support simple Tensor or a TensorList for functions that return views
-                if not is_tensor_type(return_info.type) and not is_tensor_list_type(return_info.type):
-                    raise RuntimeError(f'{base_name} that return differentiable views can only return Tensor or Tensor[]')
-                # Only allow rebasing of the history if we return a single Tensor
-                # If we are in a no grad block, raise a warning
-                # See NOTE [ View + Inplace detection ] for more details about this logic
-                if is_tensor_list_type(return_info.type):
-                    if base_name in MULTI_OUTPUT_SAFE_FUNCTIONS:
-                        creation_meta = 'CreationMeta::MULTI_OUTPUT_SAFE'
-                    else:
-                        creation_meta = 'CreationMeta::MULTI_OUTPUT_NODE'
-                    call += (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
-                             '/* is_fw_differentiable */ true, '
-                             f'/* creation_meta */ {creation_meta});')
-                    rhs_value = f'std::move({var})'
-                else:
-                    call += emit_view_lambda(unpacked_bindings)
-                    creation_meta = 'GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE'
-                    rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
-                                 '/* is_fw_differentiable */ true, '
-                                 f'/* view_func */ func, /* creation_meta */ {creation_meta})')
-            else:
-                # This could be supported but we don't need it at the moment, so keeping things simple.
-                raise RuntimeError('Function that return multiple differentiable output '
-                                   'when at least one of them is view is not supported.')
         else:
             rhs_value = f'std::move({var})'
         assert rhs_value is not None
@@ -934,49 +886,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
 
     return body, unpacked_bindings
 
-def dispatch_strategy(fn: NativeFunctionWithDifferentiabilityInfo) -> str:
-    """How are we going to call the underlying implementation of a
-    declaration?  There are two strategies:
 
-        - use_derived: we want to call the implementation on CPUDoubleType
-          (or a similar, derived Type instance).  Because these derived
-          instances deal in Tensors, not Variables (it's a completely different
-          object, so it doesn't dispatch back to VariableType), code on
-          this dispatch path needs to wrap/unwrap tensors.  If the
-          derived implementation takes and returns tensors, the
-          implementation is usually differentiable (although we also use
-          the derived dispatch path for non-differentiable functions
-          that we still want to dispatch on the derived Type instance;
-          e.g., size())
-
-        - use_type: we want to call the implementation on Type, because
-          it is implemented concretely, and the functions it invokes will
-          get dispatched back to VariableType (which will ensure that they
-          are differentiable.)
-    """
-    if fn.func.is_abstract or (fn.info is not None and fn.info.has_derivatives):
-        # If the function is abstract (not implemented on at::Type), we must
-        # call the implementation on the derived type with unpacked tensors.
-
-        # If the function has a derivative specified and is concrete, we could
-        # call either implementation. We prefer the calling the derived
-        # type's implementation with unpacked tensors because it is more
-        # performant in some cases: any internal calls to other ATen functions
-        # won't have the history tracked.
-
-        # If the function has a type dispatched argument (i.e. is a factory),
-        # we prefer calling the derived type's implementation both because it is
-        # more performant and to ensure factory functions return tensors with _version
-        # of 0 (probably not strictly necessary, but nice to have to keeps versions simple
-        # to understand.
-
-        return 'use_derived'
-    else:
-        # If the function is concrete (we don't have to override it) and we
-        # didn't declare it in derivatives.yaml, we'll assume that it is
-        # actually implemented out of differentiable functions. (This
-        # assumption might not hold, but then you'll see gradcheck fail.)
-        return 'use_type'
 
 def is_tensor_type(t: Type) -> bool:
     # TODO: Should handle optional here?
@@ -989,47 +899,4 @@ def is_tensor_list_type(t: Type) -> bool:
 def modifies_arguments(f: NativeFunction) -> bool:
     return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
 
-def match_differentiability_info(
-    native_functions: List[NativeFunction],
-    differentiability_infos: Sequence[DifferentiabilityInfo],
-) -> List[NativeFunctionWithDifferentiabilityInfo]:
-    """Sets the "derivative" key on declarations to matching autograd function
 
-    In-place functions will use the out-of-place derivative definition if there
-    is no in-place specific derivative.
-    """
-
-    info_by_schema = {info.func.func: info for info in differentiability_infos}
-    functional_info_by_signature = {
-        info.func.func.signature(strip_default=True): info
-        for info in differentiability_infos
-        if info.func.func.kind() == SchemaKind.functional}
-
-    def find_info(f: NativeFunction) -> Tuple[Optional[DifferentiabilityInfo], bool]:
-        if f.func in info_by_schema:
-            return info_by_schema[f.func], True
-
-        # if there is no exact match look for the out-of-place signature.
-        # i.e mul() for mul_() or mul_out()
-        return functional_info_by_signature.get(f.func.signature(strip_default=True)), False
-
-    result: List[NativeFunctionWithDifferentiabilityInfo] = []
-    for f in native_functions:
-        info, is_exact_match = find_info(f)
-
-        # Currently, the '.strides()' to 'strides_or_error' replacement does not support
-        # 'self' derivatives of an inplace function, so we must check for this case.
-        if f.func.kind() == SchemaKind.inplace and (info is not None):
-            for derivative in info.derivatives:
-                if 'self' in derivative.var_names:
-                    for saved_input in derivative.saved_inputs:
-                        assert 'strides_or_error' not in saved_input.expr, (
-                            "Calling '.strides()' in the 'self' derivative formula of an "
-                            f"in-place function is not supported: {f.func}")
-
-        result.append(NativeFunctionWithDifferentiabilityInfo(
-            func=f,
-            info=info,
-        ))
-
-    return result
