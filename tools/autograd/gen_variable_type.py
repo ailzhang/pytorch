@@ -25,7 +25,8 @@
 from dataclasses import dataclass
 
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
-    MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT, dispatch_strategy
+    MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT, dispatch_strategy, is_inplace_or_view, \
+    modifies_arguments
 from .gen_autograd_functions import uses_single_grad
 from .gen_trace_type import (
     MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, MANUAL_AUTOGRAD,
@@ -247,7 +248,7 @@ at::redispatch::${api_name}(${unpacked_args})""")
 # `at::AutoNonVariableTypeMode` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
 auto tmp = ([&]() {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  ${guard}
   return ${base_type_call};
 })();
 """)
@@ -279,7 +280,7 @@ func = [=](const at::Tensor& ${input_base}) {
 
 DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
 {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  ${guard}
   ${base_type_call};
 }
 """)
@@ -773,15 +774,19 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
         unpacked_args = [b.name for b in unpacked_bindings]
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args, is_view_call=False)
+        if not is_inplace_or_view(fn):
+            guard = 'at::AutoNonInferenceMode non_inf_mode(true);'
+        else:
+            guard = 'at::AutoNonVariableTypeMode non_var_type_mode(true);'
 
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
-                base_type_call=base_type_call)
+                base_type_call=base_type_call, guard=guard)
 
             call += wrap_output(f, unpacked_bindings, 'tmp')
         else:
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
-                base_type_call=base_type_call)
+                base_type_call=base_type_call, guard=guard)
         call = enforce_same_tensorimpl_and_storage(call, unpacked_bindings)
         return call
 
@@ -895,8 +900,5 @@ def is_tensor_type(t: Type) -> bool:
 def is_tensor_list_type(t: Type) -> bool:
     # TODO: Should handle optional here?
     return t.is_tensor_like() and t.is_list_like() is not None
-
-def modifies_arguments(f: NativeFunction) -> bool:
-    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
 
 

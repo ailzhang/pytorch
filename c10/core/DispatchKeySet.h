@@ -202,6 +202,9 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradOther,
 });
 
+constexpr DispatchKeySet autograd_inplace_dispatch_keyset = autograd_dispatch_keyset | DispatchKeySet({
+    DispatchKey::Inplace,
+});
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with Math
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet({

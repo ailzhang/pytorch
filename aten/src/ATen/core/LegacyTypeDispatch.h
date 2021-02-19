@@ -56,4 +56,29 @@ struct TORCH_API AutoNonVariableTypeMode {
   c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
 };
 
+struct TORCH_API AutoNonInferenceMode {
+  // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
+  // TODO: Eliminate this parameter entirely
+  AutoNonInferenceMode(bool enabled = true) :
+    autograd_guard_(c10::autograd_inplace_dispatch_keyset) {
+
+    TORCH_INTERNAL_ASSERT(enabled);
+  }
+
+  // disable all autograd dispatch keys
+  c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
+};
+
+struct TORCH_API AutoNonInplaceMode {
+  // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
+  // TODO: Eliminate this parameter entirely
+  AutoNonInplaceMode(bool enabled = true) :
+    autograd_guard_(c10::DispatchKey::Inplace) {
+
+    TORCH_INTERNAL_ASSERT(enabled);
+  }
+
+  // disable all autograd dispatch keys
+  c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
+};
 } // namespace at

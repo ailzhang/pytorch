@@ -90,6 +90,31 @@ RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'tensor_split', 'swapdims', 'swapaxes'
 })
 
+def modifies_arguments(f: NativeFunction) -> bool:
+    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
+
+
+def is_inplace_or_view(fn: NativeFunctionWithDifferentiabilityInfo) -> bool:
+    f = fn.func
+    if modifies_arguments(f):
+        return True
+    base_name = f.func.name.name.base  # TODO: should be str(f.func.name.name)?
+    view_info = VIEW_FUNCTIONS.get(base_name, None)
+    if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
+        view_info = "self"
+    return view_info is not None
+
+def inplace_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
+    if not is_inplace_or_view(fn):
+        return None
+    f = fn.func
+    return METHOD_DEFINITION.substitute(
+        return_type=cpp.returns_type(f.func.returns),
+        type_wrapper_name=type_wrapper_name(f),
+        formals=gen_formals(f),
+        type_definition_body=emit_inplace_view_body(fn),
+    )
+
 def match_differentiability_info(
     native_functions: List[NativeFunction],
     differentiability_infos: Sequence[DifferentiabilityInfo],

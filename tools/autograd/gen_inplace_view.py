@@ -10,19 +10,36 @@ from .gen_autograd_functions import uses_single_grad
 from tools.codegen.utils import mapMaybe
 from tools.codegen.gen import parse_native_yaml, FileManager
 from tools.codegen.model import *
-from tools.autograd.gen_variable_type import gen_formals, modifies_arguments, \
+from tools.autograd.gen_variable_type import gen_formals, \
     unpack_args, is_tensor_type, is_tensor_list_type, REPLAY_VIEW_LAMBDA_FUNC, \
     SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE, \
     VIEW_FUNCTIONS_WITH_METADATA_CHANGE, CALL_DISPATCH_VIA_NAMESPACE, \
     CALL_DISPATCH_VIA_METHOD, ASSIGN_RETURN_VALUE, ARRAYREF_TO_VEC, OPTIONAL_TO_VAL
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
-    MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT, dispatch_strategy
+    MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT, dispatch_strategy, is_inplace_or_view, \
+    modifies_arguments
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, declare_returned_variables, tie_return_values, get_return_value, type_wrapper_name,
 )
 
-INPLACE_VIEW_DISPATCH = CodeTemplate("""\
-${assign_return_values}at::redispatch::${api_name}(${unpacked_args});""")
+INPLACE_DISPATCH = CodeTemplate("""\
+{
+at::AutoNonInplaceMode guard(true);
+at::redispatch::${api_name}(${unpacked_args});
+}""")
+
+VIEW_DISPATCH = CodeTemplate("""\
+${assign_return_values} ([&]() {
+  at::AutoNonInplaceMode non_var_type_mode(true);
+  return at::redispatch::${api_name}(${unpacked_args});
+})();
+// std::cout << "${api_name}" << std::endl;
+""")
+
+DEFAULT_DISPATCH = CodeTemplate("""\
+at::AutoNonInplaceMode guard(true);
+return at::redispatch::${api_name}(${unpacked_args});
+""")
 
 def emit_inplace_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     f = fn.func
@@ -46,35 +63,34 @@ def emit_inplace_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[
         api_name = sig_group.signature.name()
 
     if modifies_arguments(f):
-        assign_return_values = f'{tie_return_values(f)} = ' \
-            if f.func.kind() == SchemaKind.functional and f.func.returns else ' '
-        inplace_view_body.append(INPLACE_VIEW_DISPATCH.substitute(
-            assign_return_values=assign_return_values,
+        # assign_return_values = f'{tie_return_values(f)} = ' \
+            # if f.func.kind() == SchemaKind.functional and f.func.returns else ' '
+        inplace_view_body.append(INPLACE_DISPATCH.substitute(
+            # assign_return_values=assign_return_values,
             api_name=api_name,
             unpacked_args=redispatch_args,
         ))
         for r in cpp.return_names(f):
             inplace_view_body.append(f'torch::autograd::increment_version({r});')
-    else:  # view op
+    else   :  
         unpack_args_stats, unpacked_bindings = unpack_args(f)
-        var = 'tmp'
-        inplace_view_body.append(INPLACE_VIEW_DISPATCH.substitute(
-            assign_return_values='auto ' + var + ' = ',
-            api_name=api_name,
-            unpacked_args=redispatch_args,
-        ))
         info = fn.info
         base_name = f.func.name.name.base  # TODO: should be str(f.func.name.name)?
         view_info = VIEW_FUNCTIONS.get(base_name, None)
         if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
             view_info = "self"
+        var = 'tmp'
+        inplace_view_body.append(VIEW_DISPATCH.substitute(
+            assign_return_values='auto ' + var + ' = ',
+            api_name=api_name,
+            unpacked_args=redispatch_args,
+        ))
         def is_differentiable(name: str, type: Type) -> bool:
             return type.is_tensor_like() and (info is None or name not in info.non_differentiable_arg_names)
         def gen_differentiable_outputs(f: NativeFunction) -> List[DifferentiableOutput]:
             outputs: List[DifferentiableOutput] = [
                 DifferentiableOutput(name=name, type=ret.type, cpp_type=cpp.return_type(ret))
                 for name, ret in zip(cpp.return_names(f), f.func.returns)]
-
             output_differentiability = info.output_differentiability if info else None
             if output_differentiability is not None:
                 differentiable_outputs: List[DifferentiableOutput] = []
@@ -84,16 +100,13 @@ def emit_inplace_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[
                     if differentiable:
                         differentiable_outputs.append(output)
                 return differentiable_outputs
-
             candidate_differentiable_outputs = list(filter(lambda r: is_differentiable(r.name, r.type), outputs))
-
             if uses_single_grad(info):
                 return candidate_differentiable_outputs[:1]
             else:
                 return candidate_differentiable_outputs
         differentiable_outputs = gen_differentiable_outputs(f)
         differentiable_output_vars = {r.name for r in differentiable_outputs}
-
         def emit_view_lambda(unpacked_bindings: List[Binding]) -> str:
             """ Generate an additional lambda function to recover views in backward when as_strided is not supported.
             See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
@@ -112,7 +125,6 @@ def emit_inplace_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[
                                     f'{known_types_str}. Please update the list or materialize it so that it can be closed '
                                     'over by value, also add a test in pytorch/xla/test/test_operations.py where this code '
                                     'is exercised.')
-    
                 if arg_type == 'IntArrayRef':
                     # It's not safe to close over IntArrayRef by value, since this is a
                     # reference type, so materialize a vector to close over by value
@@ -126,7 +138,6 @@ def emit_inplace_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[
                     updated_unpacked_args.append(arg_value)
                 else:
                     updated_unpacked_args.append(arg)
-
             def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str]) -> str:
                 dispatcher_sig = DispatcherSignature.from_schema(f.func)
                 dispatcher_exprs = dispatcher_sig.exprs()
@@ -143,18 +154,15 @@ def emit_inplace_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[
                         var=input_base,
                         unpacked_method_args=unpacked_args[1:])
                 return call
-
             replay_view_call = emit_dispatch_call(f, input_base, updated_unpacked_args)
             replay_view_func = REPLAY_VIEW_LAMBDA_FUNC.substitute(
                 input_base=input_base,
                 replay_view_call=replay_view_call)
             name = cpp.name(f.func)
             is_view_with_metadata_change = 'true' if name in VIEW_FUNCTIONS_WITH_METADATA_CHANGE else 'false'
-    
             return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE.substitute(
                 is_view_with_metadata_change=is_view_with_metadata_change,
                 replay_view_func=replay_view_func)
-        
         if not isinstance(view_info, str):
             raise TypeError(f'The view info should be a string for {base_name}, but it is: {view_info}')
         if len(differentiable_output_vars) == 0:
@@ -191,25 +199,20 @@ def emit_inplace_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[
         assert rhs_value is not None
         inplace_view_body.append(ASSIGN_RETURN_VALUE.substitute(return_values=tie_return_values(f),
                                                rhs_value=rhs_value))
+
+
     if f.func.returns:
         inplace_view_body.append(f'return {get_return_value(f)};')
     return inplace_view_body
 
-def is_inplace_or_view(fn: NativeFunctionWithDifferentiabilityInfo) -> bool:
-    f = fn.func
-    if modifies_arguments(f):
-        return True
-    base_name = f.func.name.name.base  # TODO: should be str(f.func.name.name)?
-    view_info = VIEW_FUNCTIONS.get(base_name, None)
-    if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
-        view_info = "self"
-    return view_info is not None
+
 
 METHOD_DEFINITION = CodeTemplate("""\
 ${return_type} ${type_wrapper_name}(${formals}) {
   ${type_definition_body}
 }
 """)
+
 
 def inplace_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     if not is_inplace_or_view(fn):
@@ -260,7 +263,7 @@ def gen_inplace_view(out: str, native_yaml_path: str, fns_with_infos: List[Nativ
     # template regarding sharding of the generated files.
     num_shards = 2
     shards: List[List[NativeFunctionWithDifferentiabilityInfo]] = [[] for _ in range(num_shards)]
- 
+
     # functions are assigned arbitrarily but stably to a file based on hash
     for fn in fns_with_infos:
         x = sum(ord(c) for c in cpp.name(fn.func.func)) % num_shards
