@@ -775,7 +775,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         unpacked_args = [b.name for b in unpacked_bindings]
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args, is_view_call=False)
         if not is_inplace_or_view(fn):
-            guard = 'at::AutoNonInferenceMode non_inf_mode(true);'
+            guard = 'at::AutoInferenceMode non_inf_mode(true);'
         else:
             guard = 'at::AutoNonVariableTypeMode non_var_type_mode(true);'
 

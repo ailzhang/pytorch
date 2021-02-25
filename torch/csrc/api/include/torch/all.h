@@ -17,3 +17,4 @@
 #include <torch/utils.h>
 #include <torch/autograd.h>
 #include <torch/version.h>
+#include <c10/core/inference_mode.h>

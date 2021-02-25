@@ -43,6 +43,8 @@ namespace at {
 // trace).  To unify the two, we would first have to move profiling and tracing
 // out of VariableType.
 
+// RAII in this file are internal only. 
+
 struct TORCH_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
@@ -56,10 +58,11 @@ struct TORCH_API AutoNonVariableTypeMode {
   c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
 };
 
-struct TORCH_API AutoNonInferenceMode {
+
+struct TORCH_API AutoInferenceMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
-  AutoNonInferenceMode(bool enabled = true) :
+  AutoInferenceMode(bool enabled = true) :
     autograd_guard_(c10::autograd_inplace_dispatch_keyset) {
 
     TORCH_INTERNAL_ASSERT(enabled);
