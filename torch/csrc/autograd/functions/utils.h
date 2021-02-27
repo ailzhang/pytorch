@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/variadic.h>
+#include <c10/core/inference_mode.h>
 
 #include <ATen/ATen.h>
 
@@ -52,6 +53,27 @@ inline bool compute_requires_grad(Args&&... args) {
     return false;
   }
   return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
+}
+
+struct AssertNoInferenceTensor : IterArgs<AssertNoInferenceTensor> {
+  using IterArgs<AssertNoInferenceTensor>::operator();
+  void operator()(const at::Tensor& tensor) {
+    const auto& var = static_cast<const Variable&>(tensor);
+     TORCH_CHECK(var.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Inplace),
+         "inference tensor cannot participate in autograd. make a feature request");
+  }
+  void operator()(const c10::optional<at::Tensor>& tensor) {
+    if (tensor.has_value()) {
+      (*this)(*tensor);
+    }
+  }
+};
+
+template <typename... Args>
+inline void assert_no_inference_tensor(Args&&... args) {
+  if (!c10::InferenceMode::is_enabled()) {
+    AssertNoInferenceTensor().apply(std::forward<Args>(args)...);
+  }
 }
 
 inline void set_history(

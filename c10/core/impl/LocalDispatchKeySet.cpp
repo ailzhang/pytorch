@@ -14,6 +14,7 @@ LocalDispatchKeySet tls_local_dispatch_key_set() {
 }
 #endif // defined(_MSC_VER) || defined(C10_ANDROID)
 
+
 void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
   raw_local_dispatch_key_set = PODLocalDispatchKeySet {
     key_set.included_.raw_repr(),
@@ -100,5 +101,7 @@ void tls_set_dispatch_key_included(DispatchKey x, bool desired_state) {
     }
   }
 }
+// tls_set_dispatch_key_included(c10::DispatchKey::Inplace, /*desired_state=*/true);
+
 
 }} // namespace c10::impl

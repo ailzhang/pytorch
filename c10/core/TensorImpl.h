@@ -546,6 +546,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     key_set_ = key_set_ - autograd_dispatch_keyset;
   }
 
+  void remove_inplace_key() {
+    key_set_ = key_set_.remove(c10::DispatchKey::Inplace);
+  }
+  
   int64_t get_device() const {
     TORCH_CHECK(
         device_opt_.has_value(),

@@ -18,6 +18,9 @@ bool InferenceMode::is_enabled() {
 
 void InferenceMode::set_enabled(bool enabled) {
   InferenceMode_enabled = enabled;
+  // MUST HAVE
+  // See quip error handling (1) (3) (6)
+  c10::impl::tls_set_dispatch_key_included(DispatchKey::Inplace, !enabled);
 }
 
 #else

@@ -17,6 +17,16 @@ namespace impl {
 // always_included to get inlined, constexpr not necessary)
 // Note DispatchKey::Autograd used to be in this set and it now has been
 // moved to TensorImpl constructor.
+// MUST HAVE DispatchKey::Inplace
+/*
+ torch::Tensor b;
+  {
+    c10::InferenceOnlyMode guard(true);
+    b = a + 1; // b doesn't have Inplace key
+  }
+  // f shouldn't have Inplace key, must go through Inplace kernel to inherit from input.
+  torch::Tensor f = b.view({2, 3});
+*/
 const DispatchKeySet always_included{DispatchKey::BackendSelect};
 
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
