@@ -36,6 +36,12 @@ ${assign_return_values} ([&]() {
 // std::cout << "${api_name}" << std::endl;
 """)
 
+THROW_IF_VARIABLETYPE_ON = """
+if (!c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_keyset)) {
+    TORCH_CHECK(false, "Cannot handle Inference Tensor outside InferenceOnlyMode");
+}
+"""
+
 DEFAULT_DISPATCH = CodeTemplate("""\
 at::AutoNonInplaceMode guard(true);
 return at::redispatch::${api_name}(${unpacked_args});
@@ -61,6 +67,7 @@ def emit_inplace_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[
         api_name = sig_group.faithful_signature.name()
     else:
         api_name = sig_group.signature.name()
+    inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
 
     if modifies_arguments(f):
         # assign_return_values = f'{tie_return_values(f)} = ' \

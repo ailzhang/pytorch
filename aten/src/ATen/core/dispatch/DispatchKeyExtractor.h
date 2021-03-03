@@ -27,7 +27,8 @@ namespace impl {
   // f shouldn't have Inplace key, must go through Inplace kernel to inherit from input.
   torch::Tensor f = b.view({2, 3});
 */
-const DispatchKeySet always_included{DispatchKey::BackendSelect};
+// const DispatchKeySet always_included = c10::autograd_dispatch_keyset.add(DispatchKey::BackendSelect); 
+const DispatchKeySet always_included = DispatchKeySet({DispatchKey::BackendSelect});
 
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
