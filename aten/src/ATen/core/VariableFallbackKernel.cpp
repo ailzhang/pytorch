@@ -57,8 +57,17 @@ TORCH_LIBRARY_IMPL(_, AutogradMLC, m) {
 }
 
 // see Note [ADInplaceOrView key]
-TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
-      m.fallback(torch::CppFunction::makeFallthrough());
-}
+// A boxed backend fallback that redispatches below ADInplaceOrView.
+// void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+//   at::AutoDispatchBelowADInplaceOrView guard;
+//   op.callBoxed(stack);
+// }
+//
+// TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
+//   m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+// }
 
+TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
 }

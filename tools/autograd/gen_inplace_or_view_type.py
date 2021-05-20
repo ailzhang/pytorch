@@ -131,6 +131,11 @@ ${assign_return_values} ([&]() {
 })();
 """)
 
+SIMPLE_REDISPATCH = CodeTemplate("""\
+at::AutoDispatchBelowADInplaceOrView guard;
+return at::redispatch::${api_name}(${unpacked_args});
+""")
+
 TMP_VAR = '_tmp'
 
 # FIXME: Ideally these functions should be methods on Type class, but we have a
@@ -343,8 +348,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         ))
         for r in cpp.return_names(f):
             inplace_view_body.append(f'increment_version({r});')
-    else:
-        assert(get_view_info(fn) is not None)
+    elif get_view_info(fn) is not None:
         inplace_view_body.append(VIEW_REDISPATCH.substitute(
             assign_return_values='auto ' + TMP_VAR + ' = ',
             api_name=api_name,
@@ -355,6 +359,11 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         assert rhs_value is not None
         inplace_view_body.append(
             ASSIGN_RETURN_VALUE.substitute(return_values=tie_return_values(f), rhs_value=rhs_value))
+    else:
+        return SIMPLE_REDISPATCH.substitute(
+            api_name=api_name,
+            unpacked_args=redispatch_args,)
+
     if f.func.returns:
         inplace_view_body.append(f'return {get_return_value(f)};')
     return inplace_view_body
@@ -372,20 +381,16 @@ def gen_formals(f: NativeFunction) -> str:
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
-        return None
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns).cpp_type(),
         type_wrapper_name=type_wrapper_name(f),
         formals=gen_formals(f),
-        type_definition_body=emit_inplace_or_view_body(fn),
+        type_definition_body=emit_inplace_or_view_body(fn)
     )
 
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
-        return None
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,
         type_wrapper_name=type_wrapper_name(f),
