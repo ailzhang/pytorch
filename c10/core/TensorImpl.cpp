@@ -94,6 +94,9 @@ TensorImpl::TensorImpl(
   // Inference tensor doesn't have version counter.
   if (!is_inference_tensor()) {
     version_counter_ = VariableVersion(/*version=*/0);
+    // Normal view tensor always have Autograd key on it.
+    DispatchKey k = key_set.highestPriorityBackendTypeId();
+    key_set_ = key_set_.add(getAutogradKeyFromBackend(k));
   }
 }
 
@@ -142,7 +145,8 @@ TensorImpl::TensorImpl(
     // TODO: Ideally we only add AutogradBackend key when the tensor requires
     // grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
-    key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
+    //key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
+    key_set_ = key_set.add(DispatchKey::ADInplaceOrView);
   }
 
   // Inference tensor doesn't have version counter.

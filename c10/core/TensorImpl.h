@@ -704,16 +704,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     key_set_ = key_set_ - autograd_dispatch_keyset;
   }
 
+  void update_dispatch_key(bool requires_grad) {
+    if (requires_grad) {
+      DispatchKey k = key_set().highestPriorityBackendTypeId();
+      key_set_ = key_set_.add(getAutogradKeyFromBackend(k));
+    } else {
+      this->remove_autograd_key();
+    }
+  }
+
   // Inference tensor doesn't have autograd or ADInplaceOrView key.
   // Invariant:
   //   Inference tensor has version_counter_.enabled() == false
   bool is_inference_tensor() {
     bool no_ADInplaceOrView = !key_set_.has(c10::DispatchKey::ADInplaceOrView);
-    bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        no_ADInplaceOrView == no_Autograd,
-        "ADInplaceOrView and Autograd keys must be on/off at the same time.");
-    return no_ADInplaceOrView && no_Autograd;
+    //bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
+    //return no_ADInplaceOrView && no_Autograd;
+    return no_ADInplaceOrView;
   }
 
   int64_t get_device() const {

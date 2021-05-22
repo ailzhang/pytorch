@@ -53,6 +53,7 @@ inline bool compute_requires_grad(Args&&... args) {
     return false;
   }
   return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
+  //return GradMode::is_enabled();
 }
 
 inline void set_history(

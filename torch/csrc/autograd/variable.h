@@ -229,6 +229,10 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // version of this class for the functions above
   mutable std::mutex mutex_;
 
+  bool requires_grad() const override {
+    return requires_grad_ || grad_fn_;
+  }
+
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
@@ -237,10 +241,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       !requires_grad || isDifferentiableType(at::typeMetaToScalarType(self_impl->dtype())),
       "Only Tensors of floating point and complex dtype can require gradients");
     requires_grad_ = requires_grad;
-  }
-
-  bool requires_grad() const override {
-    return requires_grad_ || grad_fn_;
+    if (self_impl && !is_view_) {
+      self_impl->update_dispatch_key(this->requires_grad());
+    }
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
@@ -272,6 +275,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     TORCH_CHECK(
         !grad_fn_ || !requires_grad_,
         "requires_grad should be false if grad_fn is set");
+    if (self_impl) {
+      self_impl->update_dispatch_key(this->requires_grad());
+    }
   }
 
   ~AutogradMeta() override {

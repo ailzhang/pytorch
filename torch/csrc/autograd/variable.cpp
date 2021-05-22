@@ -48,6 +48,9 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
     TORCH_INTERNAL_ASSERT(backward_info_.has_value(), "Shared view info require a backward view info.");
     TORCH_INTERNAL_ASSERT(!forward_info_.has_value(), "Shared view info require forward view info to be empty")
   }
+  if (self_impl) {
+      self_impl->update_dispatch_key(true);
+    }
 }
 
 // Chain this view info with the new view op between base and tensor
@@ -248,6 +251,7 @@ namespace impl {
     if (diff_view_meta && diff_view_meta->has_bw_view()) {
       diff_view_meta->set_attr_version(self._version());
     }
+    self.unsafeGetTensorImpl()->update_dispatch_key(meta->requires_grad());
   }
 
   Node* grad_fn_unsafe(const Variable& self) {
