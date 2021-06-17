@@ -241,6 +241,10 @@ constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
     autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
 
+constexpr DispatchKeySet autograd_dispatch_keyset_with_Func2=
+    autograd_dispatch_keyset | DispatchKeySet(DispatchKey::Func2);
+
+
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet(

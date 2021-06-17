@@ -100,6 +100,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Named:
       return "Named";
 
+    case DispatchKey::Func2:
+      return "Func2";
+
     case DispatchKey::Tracer:
       return "Tracer";
 

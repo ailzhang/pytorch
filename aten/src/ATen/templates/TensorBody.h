@@ -36,6 +36,7 @@ struct Generator;
 struct Type;
 class DeprecatedTypeProperties;
 class Tensor;
+class Alias;
 } // namespace at
 namespace at {
 namespace indexing {
@@ -67,6 +68,28 @@ inline bool variable_excluded_from_dispatch() {
 #endif
 }
 }
+
+struct ViewMeta {
+  enum class Type {
+    kReshape,
+    kNoOp,
+    kInvalid,
+  };
+
+  ViewMeta() = default;
+  ViewMeta(Type view_type, std::vector<int64_t> size, std::vector<int64_t> source_size):
+      view_type(view_type),
+      size(std::move(size)),
+      source_size(std::move(source_size)) {}
+  bool operator==(const ViewMeta& ref) const {
+    return view_type == ref.view_type && size == ref.size && source_size == ref.source_size;
+  }
+
+  Type view_type = Type::kInvalid;
+  std::vector<int64_t> size;
+  std::vector<int64_t> source_size;
+};
+
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
@@ -247,10 +270,16 @@ class TORCH_API Tensor {
 
   Tensor& operator=(const Tensor& x) & {
     impl_ = x.impl_;
+    generation_ = x.generation_;
+    //view_metas_ = x.view_metas_;
+    //alias_ = x.alias_;
     return *this;
   }
   Tensor& operator=(Tensor&& x) & {
     impl_ = std::move(x.impl_);
+    generation_ = x.generation_;
+    //view_metas_ = std::move(x.view_metas_);
+    //alias_ = std::move(x.alias_);
     return *this;
   }
 
@@ -363,9 +392,8 @@ class TORCH_API Tensor {
   const Storage& storage() const {
     return impl_->storage();
   }
-  bool is_alias_of(const at::Tensor& other) const{
-    return impl_->storage().is_alias_of(other.storage());
-  }
+  bool is_alias_of(const at::Tensor& other) const;
+
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
@@ -922,6 +950,29 @@ public:
   /// `Variable` is not a view, throw a `std::runtime_error`.
   const Tensor& _base() const;
 
+  // We already have a Tensor method called alias...
+  const std::shared_ptr<Alias>& get_alias() const { return alias_; }
+  void set_view_meta(at::ViewMeta meta, std::shared_ptr<Alias> alias) {
+    view_metas_.push_back(std::move(meta));
+    alias_ = std::move(alias);
+  }
+  void set_view_meta(std::vector<at::ViewMeta> meta, std::shared_ptr<Alias> alias) {
+    view_metas_ = std::move(meta);
+    alias_ = std::move(alias);
+  }
+
+
+  bool has_view_meta() const {
+    auto res = !view_metas_.empty() || alias_;
+    return res;
+  }
+  std::vector<ViewMeta> view_metas() const {
+    return view_metas_;
+  }
+  bool is_up_to_date() const ;
+  void sync_();
+  void add_update(const at::Tensor& updated_val, std::vector<at::ViewMeta> metas);
+
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -932,7 +983,29 @@ protected:
 
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
+  size_t generation_ = 0;
+  std::vector<ViewMeta> view_metas_;
+  std::shared_ptr<Alias> alias_;
 };
+
+class Alias {
+  public:
+    struct Update {
+        at::Tensor new_val;
+        std::vector<ViewMeta> view_metas;
+    };
+    explicit Alias(at::Tensor& base) : base_(base) {}
+    const at::Tensor base() const;
+    size_t generation() const { return generation_; }
+    void add_update(const at::Tensor& updated_val, std::vector<at::ViewMeta> metas);
+    void apply_update(const Update& update);
+    void SyncUpdateOperations();
+  private:
+    at::Tensor base_;
+    std::vector<Update> updates_;
+    size_t generation_ = 0;
+};
+
 
 // For "multiple ... operators specified" warnings, closing brace of class
 // declaration must be included between pragma push & pop

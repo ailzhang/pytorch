@@ -129,9 +129,12 @@ c10::optional<Storage> ${tensor_name}_storage_saved =
   ${tensor_name}.has_storage() ? c10::optional<Storage>(${tensor_name}.storage()) : c10::nullopt;
 """)
 
+# Once we have alias removal pass, it's no longer required to check storage aliasing.
+# Checking tensor aliasing will also cover tensors without storage.
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
 if (${tensor_name}_storage_saved.has_value())
-  AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${tensor_name}.storage()));
+  //AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${tensor_name}.storage()));
+  AT_ASSERT(${tensor_name}.is_alias_of(${tensor_name}));
 """)
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\

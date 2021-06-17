@@ -5,6 +5,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Resize.h>
@@ -21,6 +22,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
+#include <torch/library.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -2165,6 +2167,10 @@ Tensor view(const Tensor& self, IntArrayRef size) {
   return alias_with_sizes_and_strides(self, inferred_size, stride_value);
 }
 
+Tensor view_copy(const Tensor& self, IntArrayRef size) {
+  return self.view(size).clone();
+}
+
 Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
@@ -2425,3 +2431,61 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
 }
 
 }} // at::native
+
+namespace at{
+  namespace Func {
+    // The following should be codegened for every **view** op.
+    at::Tensor view(const at::Tensor& self, at::IntArrayRef size) {
+      at::Tensor out;
+      {
+        at::AutoDispatchBelowFunc2 guard;
+        out = at::native::view_copy(self, size);
+      }
+      ViewMeta view_meta = ViewMeta(ViewMeta::Type::kReshape, size.vec(), self.sizes().vec());
+      // if self is already a view, copy its ViewMeta vector and push the current one.
+      if (self.has_view_meta()) {
+        auto metas = self.view_metas();
+        metas.push_back(view_meta);
+        out.set_view_meta(metas, self.get_alias());
+      } else {
+        std::shared_ptr<Alias> alias = std::make_shared<Alias>(const_cast<Tensor&>(self));
+        ViewMeta base_view_info(ViewMeta::Type::kNoOp, self.sizes().vec(), self.sizes().vec());
+        const_cast<Tensor&>(self).set_view_meta(std::move(base_view_info), alias);
+        out.set_view_meta(view_meta, alias);
+      }
+      return out;
+    }
+
+    // The following should be codegened for every **inplace** op.
+    at::Tensor& add_(at::Tensor& self, const at::Tensor& other, const at::Scalar& alpha) {
+      {
+          at::AutoDispatchBelowFunc2 guard;
+          self.add_(other, alpha);
+      }
+      // if self is view, add this update to its alias update queue.
+      if (self.has_view_meta()) {
+        // TODO: if view_metas are the same, just replace the tensor.
+        self.add_update(self.clone(), self.view_metas());
+      }
+      return self;
+    }
+
+    // set_ is used to set self with a materialized tensor, so it
+    // need to skip materializing self tensor to break the loop.
+    at::Tensor& set_(at::Tensor& self, const at::Tensor& other) {
+      {
+         at::AutoDispatchBelowFunc2 guard;
+         self.set_(other);
+      }
+      return self;
+    }
+  } // namespace Func
+} // namespace at
+
+namespace {
+  TORCH_LIBRARY_IMPL(aten, Func2, m) {
+    m.impl("view", TORCH_FN(&at::Func::view));
+    m.impl("add_.Tensor", TORCH_FN(&at::Func::add_));
+    m.impl("set_.source_Tensor", TORCH_FN(&at::Func::set_));
+  }
+}

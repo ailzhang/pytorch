@@ -88,8 +88,9 @@ DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
 }
 
 DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t) {
+  // This is a HACK to test Func2 behavior on CPU. Ideally this key should be added per backend, e.g. in XLATensorImpl.
   return DispatchKeySet(
-      {DispatchKey::ADInplaceOrView, getAutogradKeyFromBackend(t)});
+      {DispatchKey::ADInplaceOrView, DispatchKey::Func2, getAutogradKeyFromBackend(t)});
 }
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {

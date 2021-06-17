@@ -78,6 +78,16 @@ class _Formatter(object):
         self.sci_mode = False
         self.max_width = 1
 
+        # HACK: trigger sync_ on tensor.
+        # Note the following operations only trigger sync_ on tensor_view
+        # and it's not supposed to propagate to tensor. So we have to trigger it
+        # on tensor manually.
+        # On the other hand we also trigger sync_ before any torch operations
+        # on tensors in Func2's fallback kernel.
+        # So it guarantees we always sync_ before we ask for the tensor value.
+        # (am I missing sth?)
+        tensor.sync_()
+
         with torch.no_grad():
             tensor_view = tensor.reshape(-1)
 
